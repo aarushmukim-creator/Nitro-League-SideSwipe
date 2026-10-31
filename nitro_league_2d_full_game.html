@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nitro League 2D - Physics Soccer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PeerJS for WebRTC Direct P2P Multiplayer (Bypasses iframe/DB restrictions) -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Teko:wght@600;700&family=Inter:wght@400;600;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0b0f19;
+            color: #fff;
+            overflow: hidden;
+            user-select: none;
+        }
+        .font-teko { font-family: 'Teko', sans-serif; }
+        canvas {
+            display: block;
+            background: radial-gradient(circle at center, #1a233a 0%, #090d16 100%);
+        }
+        .glow-blue { filter: drop-shadow(0 0 12px rgba(59, 130, 246, 0.6)); }
+        .glow-orange { filter: drop-shadow(0 0 12px rgba(249, 115, 22, 0.6)); }
+    </style>
+</head>
+<body class="w-screen h-screen flex flex-col items-center justify-center relative">
+
+    <!-- Top Scoreboard Overlay -->
+    <div id="hud" class="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-6 bg-slate-900/80 backdrop-blur-md px-8 py-2 rounded-2xl border border-slate-700/50 shadow-2xl z-10 hidden">
+        <!-- Blue Player -->
+        <div class="flex items-center gap-3">
+            <span id="p1-name" class="font-bold text-blue-400 text-lg">BLUE (YOU)</span>
+            <span id="score-blue" class="font-teko text-5xl text-blue-500 font-bold tracking-wider">0</span>
+        </div>
+
+        <div class="flex flex-col items-center px-4 border-x border-slate-700/60">
+            <span id="game-timer" class="font-teko text-4xl text-amber-400 font-bold leading-none">02:00</span>
+            <span id="game-mode-badge" class="text-[10px] tracking-widest text-slate-400 uppercase font-semibold">VS AI</span>
+        </div>
+
+        <!-- Orange Player -->
+        <div class="flex items-center gap-3">
+            <span id="score-orange" class="font-teko text-5xl text-orange-500 font-bold tracking-wider">0</span>
+            <span id="p2-name" class="font-bold text-orange-400 text-lg">BOT</span>
+        </div>
+    </div>
+
+    <!-- Notification / Goal Banner -->
+    <div id="goal-banner" class="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none transition-all duration-300 scale-0 opacity-0 z-20 text-center">
+        <h1 id="banner-text" class="font-teko text-8xl font-black italic tracking-wider text-amber-400 drop-shadow-[0_10px_20px_rgba(0,0,0,0.8)]">
+            GOAL!
+        </h1>
+        <p id="banner-sub" class="text-xl font-bold text-white tracking-widest uppercase"></p>
+    </div>
+
+    <!-- Main Game Canvas -->
+    <canvas id="gameCanvas" class="w-full h-full"></canvas>
+
+    <!-- Controls Bar / Visual Prompt -->
+    <div id="controls-hint" class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-slate-900/60 backdrop-blur-sm px-6 py-1.5 rounded-full border border-slate-800 text-xs text-slate-400 flex gap-6 z-10 hidden">
+        <span><b class="text-white">A / D</b> Drive</span>
+        <span><b class="text-white">W / S</b> Tilt Aerial</span>
+        <span><b class="text-white">J / Space</b> Jump / Flip</span>
+        <span><b class="text-white">K / LShift</b> Boost</span>
+        <span><b class="text-amber-400">Flip Reset:</b> Touch ball with belly/wheels</span>
+    </div>
+
+    <!-- MAIN MENU OVERLAY -->
+    <div id="menu-screen" class="absolute inset-0 bg-slate-950/90 backdrop-blur-xl flex flex-col items-center justify-center gap-8 z-30">
+        <div class="text-center space-y-1">
+            <h1 class="font-teko text-8xl font-black italic tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-300 to-orange-500 drop-shadow-lg">
+                NITRO LEAGUE 2D
+            </h1>
+            <p class="text-slate-400 font-semibold tracking-wider uppercase text-sm">2D Aerial Rocket Soccer Physics Game</p>
+        </div>
+
+        <div class="flex flex-col gap-4 w-72">
+            <button id="vs-ai-btn" class="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black text-xl rounded-xl shadow-lg shadow-blue-900/40 transform hover:-translate-y-0.5 active:translate-y-0 transition">
+                SOLO VS AI BOT
+            </button>
+            <button id="play-friends-btn" class="w-full py-4 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white font-black text-xl rounded-xl shadow-lg shadow-orange-900/40 transform hover:-translate-y-0.5 active:translate-y-0 transition">
+                PLAY WITH FRIENDS
+            </button>
+        </div>
+
+        <div class="bg-slate-900/80 p-5 rounded-2xl border border-slate-800 text-xs text-slate-400 max-w-md space-y-2">
+            <div class="text-slate-200 font-bold uppercase tracking-wider text-center border-b border-slate-800 pb-2">Special Shot Controls</div>
+            <div class="grid grid-cols-3 gap-2 text-center pt-1">
+                <div class="bg-slate-800/60 p-2 rounded-lg">
+                    <span class="text-red-400 font-bold block">🔴 RED SHOT</span>
+                    <span>Front bumper hit while flipping nose-first</span>
+                </div>
+                <div class="bg-slate-800/60 p-2 rounded-lg">
+                    <span class="text-purple-400 font-bold block">🟣 PURPLE SHOT</span>
+                    <span>Belly hit while facing away / air stalling</span>
+                </div>
+                <div class="bg-slate-800/60 p-2 rounded-lg">
+                    <span class="text-amber-400 font-bold block">🟡 GOLD SHOT</span>
+                    <span>Tail hit while back-flicking away from ball</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOBBY / MULTIPLAYER OVERLAY -->
+    <div id="lobby-screen" class="absolute inset-0 bg-slate-950/95 backdrop-blur-xl flex flex-col items-center justify-center gap-6 z-30 hidden">
+        <h2 class="font-teko text-6xl font-bold text-orange-400">ONLINE MULTIPLAYER</h2>
+
+        <div class="bg-slate-900 border border-slate-800 p-6 rounded-2xl w-80 flex flex-col gap-4 text-center">
+            <button id="create-room-btn" class="py-3 bg-orange-600 hover:bg-orange-500 font-bold rounded-xl text-white shadow-md transition">
+                CREATE PRIVATE ROOM
+            </button>
+
+            <div class="relative flex py-1 items-center">
+                <div class="flex-grow border-t border-slate-800"></div>
+                <span class="flex-shrink mx-3 text-slate-500 text-xs uppercase font-bold">OR JOIN ROOM</span>
+                <div class="flex-grow border-t border-slate-800"></div>
+            </div>
+
+            <div class="flex gap-2">
+                <input id="room-code-input" type="text" placeholder="6-DIGIT CODE" maxlength="6" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 text-center uppercase tracking-widest font-mono text-lg text-white focus:outline-none focus:border-orange-500">
+                <button id="join-room-btn" class="px-5 bg-blue-600 hover:bg-blue-500 font-bold rounded-xl text-white transition">
+                    JOIN
+                </button>
+            </div>
+        </div>
+
+        <!-- Waiting Status Box -->
+        <div id="room-status-box" class="bg-slate-900/60 border border-slate-800 p-4 rounded-xl text-center hidden w-80 space-y-2">
+            <div id="room-code-display" class="font-mono text-2xl font-bold text-amber-400 tracking-wider">------</div>
+            <p id="room-status-text" class="text-xs text-slate-400 animate-pulse">Waiting for Player 2 to join with this code...</p>
+            <button id="copy-code-btn" class="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1 rounded text-slate-300 font-semibold border border-slate-700">
+                Copy Room Code
+            </button>
+        </div>
+
+        <!-- Join Error Alert Banner -->
+        <div id="lobby-error" class="text-red-400 font-bold text-sm bg-red-950/80 border border-red-800/80 px-4 py-2 rounded-xl text-center hidden w-80">
+            Room code not found! Make sure the host has created the room first.
+        </div>
+
+        <button id="back-to-menu" class="text-sm text-slate-400 hover:text-white font-semibold underline mt-2">
+            ← Back to Main Menu
+        </button>
+    </div>
+
+    <!-- MAIN GAME LOGIC SCRIPT -->
+    <script>
+        // --- Web Audio Sound Synthesizer ---
+        const AudioFX = {
+            ctx: null,
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) this.ctx = new AudioCtx();
+                }
+            },
+            playBoost() {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.15);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            },
+            playHit(freq = 150, type = 'sine') {
+                if (!this.ctx) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(30, this.ctx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.2);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.2);
+            },
+            playSpecialShot(color) {
+                if (!this.ctx) return;
+                const baseFreq = color === 'red' ? 400 : color === 'purple' ? 300 : 500;
+                this.playHit(baseFreq, 'square');
+            }
+        };
+
+        // --- Game Setup & State Variables ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let isMultiplayer = false;
+        let isHost = true;
+        let myRole = 'p1';
+        let peer = null;
+        let peerConn = null;
+
+        // Arena & Physics Constant Parameters
+        const WORLD = {
+            width: 1400,
+            height: 750,
+            gravity: 0.38,
+            friction: 0.985,
+            groundY: 670,
+            ceilingY: 80,
+            goalHeight: 220,
+            goalDepth: 120
+        };
+
+        let keys = {};
+        let particles = [];
+        let shockwaves = [];
+
+        // Game Objects
+        let p1 = createPlayer(280, WORLD.groundY - 30, '#3b82f6', 'p1');
+        let p2 = createPlayer(WORLD.width - 280, WORLD.groundY - 30, '#f97316', 'p2');
+        let ball = createBall();
+
+        let score = { blue: 0, orange: 0 };
+        let timer = 120; // 2 minutes
+        let timerInterval = null;
+        let matchActive = false;
+
+        function resetPositions() {
+            p1.x = 280;
+            p1.y = WORLD.groundY - 30;
+            p1.vx = 0; p1.vy = 0;
+            p1.angle = 0;
+            p1.boost = 100;
+            p1.flips = 1;
+
+            p2.x = WORLD.width - 280;
+            p2.y = WORLD.groundY - 30;
+            p2.vx = 0; p2.vy = 0;
+            p2.angle = Math.PI;
+            p2.boost = 100;
+            p2.flips = 1;
+
+            ball.x = WORLD.width / 2;
+            ball.y = WORLD.groundY - 220;
+            ball.vx = 0; ball.vy = 0;
+        }
+
+        function startGame() {
+            document.getElementById('menu-screen').classList.add('hidden');
+            document.getElementById('lobby-screen').classList.add('hidden');
+            document.getElementById('hud').classList.remove('hidden');
+            document.getElementById('controls-hint').classList.remove('hidden');
+
+            score = { blue: 0, orange: 0 };
+            document.getElementById('score-blue').innerText = '0';
+            document.getElementById('score-orange').innerText = '0';
+
+            resetPositions();
+            matchActive = true;
+
+            timer = 120;
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                if (!matchActive) return;
+                timer--;
+                const mins = String(Math.floor(timer / 60)).padStart(2, '0');
+                const secs = String(timer % 60).padStart(2, '0');
+                document.getElementById('game-timer').innerText = `${mins}:${secs}`;
+
+                if (timer <= 0) {
+                    endMatch();
+                }
+            }, 1000);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function createPlayer(x, y, color, id) {
+            return {
+                id,
+                x, y,
+                vx: 0, vy: 0,
+                width: 64, height: 28,
+                angle: id === 'p1' ? 0 : Math.PI,
+                color,
+                boost: 100,
+                flips: 1,
+                hasReset: false,
+                isStalling: false,
+                lastJumpPressed: false,
+                lastBoostPressed: false,
+                flipTimer: 0
+            };
+        }
+
+        function createBall() {
+            return {
+                x: WORLD.width / 2,
+                y: WORLD.groundY - 220,
+                vx: 0, vy: 0,
+                radius: 26,
+                rotation: 0
+            };
+        }
+
+        // Window & Canvas Sizing
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Keyboard Handlers
+        window.addEventListener('keydown', (e) => {
+            AudioFX.init();
+            keys[e.code] = true;
+            if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+                e.preventDefault();
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+
+        // --- Menu Logic & Interactions ---
+        document.getElementById('vs-ai-btn').addEventListener('click', () => {
+            isMultiplayer = false;
+            document.getElementById('p2-name').innerText = 'BOT';
+            document.getElementById('game-mode-badge').innerText = 'VS AI BOT';
+            startGame();
+        });
+
+        document.getElementById('play-friends-btn').addEventListener('click', () => {
+            document.getElementById('menu-screen').classList.add('hidden');
+            document.getElementById('lobby-screen').classList.remove('hidden');
+            initPeerJS();
+        });
+
+        document.getElementById('back-to-menu').addEventListener('click', () => {
+            document.getElementById('lobby-screen').classList.add('hidden');
+            document.getElementById('menu-screen').classList.remove('hidden');
+            if (peerConn) peerConn.close();
+            if (peer) peer.destroy();
+        });
+
+        // --- WebRTC PeerJS Engine ---
+        function initPeerJS() {
+            if (peer && !peer.destroyed) return;
+            peer = new Peer();
+
+            peer.on('open', (id) => {
+                console.log('Peer ID ready:', id);
+            });
+
+            peer.on('connection', (conn) => {
+                peerConn = conn;
+                isMultiplayer = true;
+                isHost = true;
+                myRole = 'p1';
+
+                setupConnectionListeners();
+                document.getElementById('p2-name').innerText = 'PLAYER 2 (FRIEND)';
+                document.getElementById('game-mode-badge').innerText = 'ONLINE 1V1';
+                startGame();
+            });
+
+            peer.on('error', (err) => {
+                const errDiv = document.getElementById('lobby-error');
+                errDiv.innerText = "Connection error: " + err.type;
+                errDiv.classList.remove('hidden');
+            });
+        }
+
+        function setupConnectionListeners() {
+            peerConn.on('data', (data) => {
+                if (isHost) {
+                    // Host receives Player 2 controls/position
+                    if (data.p2) {
+                        p2.x = data.p2.x; p2.y = data.p2.y; p2.angle = data.p2.angle;
+                    }
+                } else {
+                    // Joiner receives synced world state from Host
+                    if (data.p1) { p1.x = data.p1.x; p1.y = data.p1.y; p1.angle = data.p1.angle; }
+                    if (data.ball) { ball.x = data.ball.x; ball.y = data.ball.y; }
+                    if (data.score) {
+                        score = data.score;
+                        document.getElementById('score-blue').innerText = score.blue;
+                        document.getElementById('score-orange').innerText = score.orange;
+                    }
+                }
+            });
+
+            peerConn.on('close', () => {
+                alert("Opponent disconnected!");
+                endMatch();
+            });
+        }
+
+        document.getElementById('create-room-btn').addEventListener('click', () => {
+            document.getElementById('lobby-error').classList.add('hidden');
+            const createBtn = document.getElementById('create-room-btn');
+            
+            if (!peer || !peer.id) {
+                createBtn.innerText = "CONNECTING...";
+                setTimeout(() => createBtn.click(), 500);
+                return;
+            }
+
+            // Generate a short 6-character room code from the peer ID
+            const roomCode = peer.id.substring(0, 6).toUpperCase();
+            document.getElementById('room-code-display').innerText = roomCode;
+            document.getElementById('room-status-box').classList.remove('hidden');
+            createBtn.innerText = "ROOM CREATED!";
+        });
+
+        document.getElementById('join-room-btn').addEventListener('click', () => {
+            document.getElementById('lobby-error').classList.add('hidden');
+            const inputCode = document.getElementById('room-code-input').value.trim();
+            
+            if (!inputCode) {
+                const errDiv = document.getElementById('lobby-error');
+                errDiv.innerText = "Please enter a valid room code!";
+                errDiv.classList.remove('hidden');
+                return;
+            }
+
+            isMultiplayer = true;
+            isHost = false;
+            myRole = 'p2';
+
+            if (!peer) initPeerJS();
+
+            // Connect using the peer ID code
+            peerConn = peer.connect(inputCode.toLowerCase());
+
+            peerConn.on('open', () => {
+                setupConnectionListeners();
+                document.getElementById('p2-name').innerText = 'PLAYER 1 (HOST)';
+                document.getElementById('game-mode-badge').innerText = 'ONLINE 1V1';
+                startGame();
+            });
+
+            peerConn.on('error', () => {
+                const errDiv = document.getElementById('lobby-error');
+                errDiv.innerText = "Could not find room code! Check with host.";
+                errDiv.classList.remove('hidden');
+            });
+        });
+
+        document.getElementById('copy-code-btn').addEventListener('click', () => {
+            const code = document.getElementById('room-code-display').innerText;
+            navigator.clipboard.writeText(code);
+            document.getElementById('copy-code-btn').innerText = 'Copied!';
+            setTimeout(() => document.getElementById('copy-code-btn').innerText = 'Copy Room Code', 2000);
+        });
+
+        // Send local movements over WebRTC data channel
+        function syncNetworkState() {
+            if (!isMultiplayer || !peerConn || peerConn.open === false) return;
+
+            if (isHost) {
+                peerConn.send({
+                    p1: { x: p1.x, y: p1.y, angle: p1.angle },
+                    ball: { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy },
+                    score: score
+                });
+            } else {
+                peerConn.send({
+                    p2: { x: p2.x, y: p2.y, angle: p2.angle }
+                });
+            }
+        }
+
+        // --- Core Physics Engine & Update ---
+        function updatePlayer(p, isLocalControl) {
+            const isGrounded = (p.y + p.height / 2) >= WORLD.groundY - 2;
+
+            if (isGrounded) {
+                p.flips = 1;
+                p.angle = p.angle * 0.8; // Align back straight
+                p.vy = 0;
+                p.y = WORLD.groundY - p.height / 2;
+                if (p.boost < 100) p.boost = Math.min(100, p.boost + 0.35); // Recharge boost on ground
+            } else {
+                p.vy += WORLD.gravity;
+            }
+
+            if (!isLocalControl) {
+                // Secondary player positioning updated via network state or AI
+                p.x += p.vx; p.y += p.vy;
+                p.vx *= WORLD.friction; p.vy *= WORLD.friction;
+                return;
+            }
+
+            // --- Input Controls Processing ---
+            let left = keys['KeyA'];
+            let right = keys['KeyD'];
+            let up = keys['KeyW'];
+            let down = keys['KeyS'];
+            let jump = keys['KeyJ'] || keys['Space'];
+            let boost = keys['KeyK'] || keys['ShiftLeft'];
+
+            // Driving / Ground movement
+            if (isGrounded) {
+                if (left) p.vx -= 0.6;
+                if (right) p.vx += 0.6;
+            } else {
+                // Aerial rotational tilting
+                if (left) p.angle -= 0.08;
+                if (right) p.angle += 0.08;
+                if (up) p.angle -= 0.06;
+                if (down) p.angle += 0.06;
+            }
+
+            // Boost
+            if (boost && p.boost > 0) {
+                p.boost -= 0.6;
+                const thrust = 0.55;
+                p.vx += Math.cos(p.angle) * thrust;
+                p.vy += Math.sin(p.angle) * thrust;
+                AudioFX.playBoost();
+
+                // Thrust particles
+                particles.push({
+                    x: p.x - Math.cos(p.angle) * 30,
+                    y: p.y - Math.sin(p.angle) * 30,
+                    vx: -Math.cos(p.angle) * 4 + (Math.random() - 0.5) * 2,
+                    vy: -Math.sin(p.angle) * 4 + (Math.random() - 0.5) * 2,
+                    size: Math.random() * 8 + 4,
+                    color: p.id === 'p1' ? '#60a5fa' : '#fb923c',
+                    life: 20
+                });
+            }
+
+            // Jump & Flip Logic
+            if (jump && !p.lastJumpPressed) {
+                if (isGrounded) {
+                    p.vy = -10.5;
+                    AudioFX.playHit(200);
+                } else if (p.flips > 0) {
+                    // Perform Aerial Flip / Stall Shot
+                    p.flips--;
+                    p.flipTimer = 15;
+
+                    let flipDirX = 0;
+                    let flipDirY = 0;
+
+                    if (left) flipDirX -= 1;
+                    if (right) flipDirX += 1;
+                    if (up) flipDirY -= 1;
+                    if (down) flipDirY += 1;
+
+                    if (flipDirX === 0 && flipDirY === 0) {
+                        // Neutral Air Stall
+                        p.vx *= 0.2;
+                        p.vy *= 0.2;
+                        p.isStalling = true;
+                    } else {
+                        const mag = Math.hypot(flipDirX, flipDirY);
+                        p.vx = (flipDirX / mag) * 11;
+                        p.vy = (flipDirY / mag) * 11;
+                    }
+
+                    // Flip effect wave
+                    shockwaves.push({ x: p.x, y: p.y, radius: 10, maxRadius: 40, color: '#fff', life: 10 });
+                    AudioFX.playHit(350);
+                }
+            }
+            p.lastJumpPressed = jump;
+
+            // Apply Velocity
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vx *= WORLD.friction;
+            p.vy *= WORLD.friction;
+
+            // Arena Walls & Ceiling Bounds
+            if (p.x < 30) { p.x = 30; p.vx = 0; }
+            if (p.x > WORLD.width - 30) { p.x = WORLD.width - 30; p.vx = 0; }
+            if (p.y < WORLD.ceilingY) { p.y = WORLD.ceilingY; p.vy = 0; }
+        }
+
+        // --- AI Bot Controller ---
+        function updateAI(bot) {
+            const distToBall = Math.hypot(ball.x - bot.x, ball.y - bot.y);
+            const isGrounded = (bot.y + bot.height / 2) >= WORLD.groundY - 2;
+
+            if (isGrounded) {
+                bot.flips = 1;
+                bot.angle = bot.angle * 0.8;
+                bot.vy = 0;
+                bot.y = WORLD.groundY - bot.height / 2;
+            } else {
+                bot.vy += WORLD.gravity;
+            }
+
+            // AI Drive Decision
+            if (ball.x < bot.x) {
+                bot.vx -= 0.5;
+                if (!isGrounded) bot.angle = Math.PI;
+            } else {
+                bot.vx += 0.5;
+                if (!isGrounded) bot.angle = 0;
+            }
+
+            // AI Jump & Aerial Chase
+            if (ball.y < bot.y - 80 && distToBall < 300) {
+                if (isGrounded) {
+                    bot.vy = -11;
+                } else if (bot.boost > 10) {
+                    bot.boost -= 0.5;
+                    const angleToBall = Math.atan2(ball.y - bot.y, ball.x - bot.x);
+                    bot.angle = angleToBall;
+                    bot.vx += Math.cos(angleToBall) * 0.5;
+                    bot.vy += Math.sin(angleToBall) * 0.5;
+                }
+            }
+
+            bot.x += bot.vx;
+            bot.y += bot.vy;
+            bot.vx *= WORLD.friction;
+            bot.vy *= WORLD.friction;
+
+            // AI Boundaries
+            if (bot.x < 30) bot.x = 30;
+            if (bot.x > WORLD.width - 30) bot.x = WORLD.width - 30;
+        }
+
+        // --- Ball Physics & Mechanics ---
+        function updateBall() {
+            ball.vy += WORLD.gravity * 0.85;
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            ball.vx *= 0.99;
+            ball.vy *= 0.99;
+
+            // Ball Ground Bounce
+            if (ball.y + ball.radius >= WORLD.groundY) {
+                ball.y = WORLD.groundY - ball.radius;
+                ball.vy = -ball.vy * 0.72;
+                ball.vx *= 0.95;
+            }
+
+            // Ball Ceiling Bounce
+            if (ball.y - ball.radius <= WORLD.ceilingY) {
+                ball.y = WORLD.ceilingY + ball.radius;
+                ball.vy = -ball.vy * 0.75;
+            }
+
+            // Left & Right Outer Bounds / Goal Checks
+            const inLeftGoalY = ball.y > (WORLD.groundY - WORLD.goalHeight);
+            const inRightGoalY = ball.y > (WORLD.groundY - WORLD.goalHeight);
+
+            if (ball.x - ball.radius <= 40) {
+                if (inLeftGoalY) {
+                    if (ball.x <= -WORLD.goalDepth + 30) triggerGoal('orange');
+                } else {
+                    ball.x = 40 + ball.radius;
+                    ball.vx = -ball.vx * 0.8;
+                }
+            }
+
+            if (ball.x + ball.radius >= WORLD.width - 40) {
+                if (inRightGoalY) {
+                    if (ball.x >= WORLD.width + WORLD.goalDepth - 30) triggerGoal('blue');
+                } else {
+                    ball.x = WORLD.width - 40 - ball.radius;
+                    ball.vx = -ball.vx * 0.8;
+                }
+            }
+        }
+
+        // --- Car & Ball Collision + Special Shot Engine ---
+        function checkCarBallCollision(p) {
+            const dx = ball.x - p.x;
+            const dy = ball.y - p.y;
+            const dist = Math.hypot(dx, dy);
+            const minDist = ball.radius + p.height;
+
+            if (dist < minDist) {
+                const angle = Math.atan2(dy, dx);
+                let hitPower = 8.5;
+
+                // --- Flip Reset / Stall Reset Mechanics ---
+                // Wheels/Belly angle check relative to collision angle
+                const bellyAngle = p.angle + Math.PI / 2;
+                const angleDiff = Math.abs((angle - bellyAngle + Math.PI * 3) % (Math.PI * 2) - Math.PI);
+
+                if (angleDiff < 0.6) {
+                    p.flips = 1; // RESET FLIP!
+                    shockwaves.push({ x: p.x, y: p.y, radius: 5, maxRadius: 30, color: '#a855f7', life: 12 });
+                }
+
+                // --- Special Shots Detection ---
+                let specialColor = null;
+
+                // 🔴 Red Power Shot: Front bumper hit during forward flip
+                if (p.flipTimer > 0 && Math.abs(angle - p.angle) < 0.8) {
+                    hitPower = 18.5;
+                    specialColor = 'red';
+                }
+                // 🟣 Purple Shot: Underbelly hit facing away
+                else if (p.isStalling && angleDiff < 0.5) {
+                    hitPower = 16.0;
+                    specialColor = 'purple';
+                }
+                // 🟡 Gold Shot: Backside tail hit while flicking away
+                else if (p.flipTimer > 0 && Math.abs(angle - (p.angle + Math.PI)) < 0.8) {
+                    hitPower = 20.0;
+                    specialColor = 'gold';
+                }
+
+                p.isStalling = false;
+
+                // Apply Hit Impulse
+                ball.vx = Math.cos(angle) * hitPower;
+                ball.vy = Math.sin(angle) * hitPower;
+
+                // Visual Shockwave Effect
+                const shockColor = specialColor === 'red' ? '#ef4444' : specialColor === 'purple' ? '#c084fc' : specialColor === 'gold' ? '#fbbf24' : '#ffffff';
+                shockwaves.push({ x: ball.x, y: ball.y, radius: 10, maxRadius: hitPower * 4, color: shockColor, life: 15 });
+
+                if (specialColor) AudioFX.playSpecialShot(specialColor);
+                else AudioFX.playHit(260);
+            }
+        }
+
+        // Goal Scored Handler
+        function triggerGoal(team) {
+            if (!matchActive) return;
+            matchActive = false;
+
+            if (team === 'blue') score.blue++;
+            else score.orange++;
+
+            document.getElementById('score-blue').innerText = score.blue;
+            document.getElementById('score-orange').innerText = score.orange;
+
+            const banner = document.getElementById('goal-banner');
+            const bannerText = document.getElementById('banner-text');
+            const bannerSub = document.getElementById('banner-sub');
+
+            bannerText.innerText = 'GOAL!';
+            bannerText.className = `font-teko text-8xl font-black italic tracking-wider drop-shadow-2xl ${team === 'blue' ? 'text-blue-500' : 'text-orange-500'}`;
+            bannerSub.innerText = `${team.toUpperCase()} TEAM SCORED!`;
+
+            banner.classList.remove('scale-0', 'opacity-0');
+            banner.classList.add('scale-100', 'opacity-100');
+
+            setTimeout(() => {
+                banner.classList.remove('scale-100', 'opacity-100');
+                banner.classList.add('scale-0', 'opacity-0');
+                resetPositions();
+                matchActive = true;
+            }, 2000);
+        }
+
+        function endMatch() {
+            matchActive = false;
+            clearInterval(timerInterval);
+
+            const banner = document.getElementById('goal-banner');
+            const bannerText = document.getElementById('banner-text');
+            const bannerSub = document.getElementById('banner-sub');
+
+            const winner = score.blue > score.orange ? 'BLUE WINS!' : score.orange > score.blue ? 'ORANGE WINS!' : 'DRAW!';
+            bannerText.innerText = winner;
+            bannerSub.innerText = `FINAL SCORE: ${score.blue} - ${score.orange}`;
+
+            banner.classList.remove('scale-0', 'opacity-0');
+            banner.classList.add('scale-100', 'opacity-100');
+
+            setTimeout(() => {
+                banner.classList.remove('scale-100', 'opacity-100');
+                banner.classList.add('scale-0', 'opacity-0');
+                document.getElementById('hud').classList.add('hidden');
+                document.getElementById('controls-hint').classList.add('hidden');
+                document.getElementById('menu-screen').classList.remove('hidden');
+            }, 4000);
+        }
+
+        // --- Main Render Loop ---
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Scale to screen aspect ratio
+            const scale = Math.min(canvas.width / WORLD.width, canvas.height / WORLD.height);
+            const offsetX = (canvas.width - WORLD.width * scale) / 2;
+            const offsetY = (canvas.height - WORLD.height * scale) / 2;
+
+            ctx.save();
+            ctx.translate(offsetX, offsetY);
+            ctx.scale(scale, scale);
+
+            // 1. Draw Field & Background Grid
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+            ctx.lineWidth = 2;
+            for (let x = 0; x < WORLD.width; x += 80) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD.height); ctx.stroke();
+            }
+
+            // Ceiling & Ground
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, WORLD.width, WORLD.ceilingY);
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(0, WORLD.groundY, WORLD.width, WORLD.height - WORLD.groundY);
+
+            // Ground Turf Line
+            ctx.fillStyle = '#22c55e';
+            ctx.fillRect(0, WORLD.groundY - 4, WORLD.width, 4);
+
+            // 2. Draw Goals
+            // Left Goal (Blue)
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+            ctx.fillRect(0, WORLD.groundY - WORLD.goalHeight, 40, WORLD.goalHeight);
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(0, WORLD.groundY - WORLD.goalHeight, 40, WORLD.goalHeight);
+
+            // Right Goal (Orange)
+            ctx.fillStyle = 'rgba(249, 115, 22, 0.15)';
+            ctx.fillRect(WORLD.width - 40, WORLD.groundY - WORLD.goalHeight, 40, WORLD.goalHeight);
+            ctx.strokeStyle = '#f97316';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(WORLD.width - 40, WORLD.groundY - WORLD.goalHeight, 40, WORLD.goalHeight);
+
+            // 3. Draw Shockwaves
+            for (let i = shockwaves.length - 1; i >= 0; i--) {
+                const sw = shockwaves[i];
+                ctx.strokeStyle = sw.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+                ctx.stroke();
+
+                sw.radius += (sw.maxRadius - sw.radius) * 0.3;
+                sw.life--;
+                if (sw.life <= 0) shockwaves.splice(i, 1);
+            }
+
+            // 4. Draw Boost Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const pt = particles[i];
+                ctx.fillStyle = pt.color;
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, pt.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                pt.x += pt.vx; pt.y += pt.vy;
+                pt.size *= 0.9;
+                pt.life--;
+                if (pt.life <= 0) particles.splice(i, 1);
+            }
+
+            // 5. Draw Soccer Ball
+            ctx.save();
+            ctx.translate(ball.x, ball.y);
+            ball.rotation += ball.vx * 0.03;
+            ctx.rotate(ball.rotation);
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.beginPath();
+            ctx.arc(0, 0, ball.radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Ball Pattern
+            ctx.fillStyle = '#0f172a';
+            for (let a = 0; a < Math.PI * 2; a += Math.PI / 2.5) {
+                ctx.beginPath();
+                ctx.arc(Math.cos(a) * 12, Math.sin(a) * 12, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+
+            // 6. Draw Player Cars
+            [p1, p2].forEach(p => {
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.angle);
+
+                // Car Chassis
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.roundRect(-p.width / 2, -p.height / 2, p.width, p.height, 8);
+                ctx.fill();
+
+                // Windshield / Cabin
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(-8, -p.height / 2 + 3, 18, 10);
+
+                // Wheels
+                ctx.fillStyle = '#334155';
+                ctx.fillRect(-p.width / 2 + 6, p.height / 2 - 3, 14, 6);
+                ctx.fillRect(p.width / 2 - 20, p.height / 2 - 3, 14, 6);
+
+                // Flip Reset Indicator Glow
+                if (p.flips > 0) {
+                    ctx.strokeStyle = '#a855f7';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(-p.width / 2 - 2, -p.height / 2 - 2, p.width + 4, p.height + 4);
+                }
+
+                ctx.restore();
+            });
+
+            ctx.restore();
+        }
+
+        // --- Main Animation Loop ---
+        function gameLoop() {
+            if (matchActive) {
+                if (p1.flipTimer > 0) p1.flipTimer--;
+                if (p2.flipTimer > 0) p2.flipTimer--;
+
+                if (!isMultiplayer) {
+                    updatePlayer(p1, true);
+                    updateAI(p2);
+                } else {
+                    updatePlayer(p1, myRole === 'p1');
+                    updatePlayer(p2, myRole === 'p2');
+                    syncNetworkState();
+                }
+
+                updateBall();
+                checkCarBallCollision(p1);
+                checkCarBallCollision(p2);
+            }
+
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+
+        window.onload = () => {
+            render();
+        };
+    </script>
+</body>
+</html>
